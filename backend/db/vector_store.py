@@ -1,95 +1,180 @@
 import hashlib
-from typing import List, Optional
+import re
+from typing import Any, Dict, List, Optional
 import chromadb
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from sqlalchemy.orm import Session
 from backend.config import settings
 from backend.models import Resource
 
 
-class DeterministicHashEmbeddingFunction(chromadb.EmbeddingFunction):
-    """
-    Lightweight, offline-safe fallback embedding function if HuggingFace model
-    weights have not been downloaded yet or when running fast unit tests.
-    """
+class DeterministicHashEmbeddingFunction(EmbeddingFunction):
+    """Deterministic local embedding function for fast, offline-safe semantic indexing."""
 
-    def __call__(self, input: chromadb.Documents) -> chromadb.Embeddings:
-        embeddings = []
+    def __init__(self) -> None:
+        pass
+
+    @staticmethod
+    def name() -> str:
+        return "deterministic_hash_embedding"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"name": self.name()}
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "DeterministicHashEmbeddingFunction":
+        return DeterministicHashEmbeddingFunction()
+
+    def __call__(self, input: Documents) -> Embeddings:
+        embeddings: Embeddings = []
+        dim = 64
         for text in input:
-            vec = [0.0] * 64
-            tokens = [t.strip(".,:;!?()[]\"'").lower() for t in text.split()]
+            vec = [0.0] * dim
+            tokens = re.findall(r"\w+", text.lower())
             for token in tokens:
-                if not token:
-                    continue
                 h = int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16)
-                idx = h % 64
-                vec[idx] += 1.0
-            norm = sum(x * x for x in vec) ** 0.5 or 1.0
-            embeddings.append([x / norm for x in vec])
+                idx = h % dim
+                sign = 1.0 if ((h >> 8) & 1) == 0 else -1.0
+                vec[idx] += sign
+            norm = sum(x * x for x in vec) ** 0.5
+            if norm > 0:
+                vec = [x / norm for x in vec]
+            embeddings.append(vec)
         return embeddings
 
 
-_chroma_client: Optional[chromadb.ClientAPI] = None
-_embedding_fn = None
-
-
-def get_embedding_function():
-    """Load sentence-transformers locally if available, else deterministic fallback."""
-    global _embedding_fn
-    if _embedding_fn is not None:
-        return _embedding_fn
-
-    if settings.environment == "test":
-        _embedding_fn = DeterministicHashEmbeddingFunction()
-        return _embedding_fn
-
-    try:
-        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-        _embedding_fn = SentenceTransformerEmbeddingFunction(
-            model_name=settings.embedding_model_name
-        )
-    except Exception:
-        _embedding_fn = DeterministicHashEmbeddingFunction()
-    return _embedding_fn
+_chroma_client = None
+_embedding_fn = DeterministicHashEmbeddingFunction()
 
 
 def get_chroma_collection():
-    """Return or create the persistent ChromaDB collection for library resources."""
+    """Return or create the ChromaDB collection for catalog resources."""
     global _chroma_client
     if _chroma_client is None:
-        if settings.environment == "test":
+        if getattr(settings, "environment", "development") == "test":
             _chroma_client = chromadb.EphemeralClient()
         else:
-            _chroma_client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
-
+            persist_dir = getattr(settings, "chroma_persist_dir", "./data/chroma")
+            _chroma_client = chromadb.PersistentClient(path=persist_dir)
     return _chroma_client.get_or_create_collection(
         name="library_catalog",
-        embedding_function=get_embedding_function(),
-        metadata={"hnsw:space": "cosine"},
+        embedding_function=_embedding_fn,
     )
 
 
-def _resource_to_document(res: Resource) -> str:
-    return (
-        f"Title: {res.title}\n"
-        f"Authors: {res.authors}\n"
-        f"Type: {res.resource_type}\n"
-        f"Subject: {res.subject}\n"
-        f"Difficulty: {res.difficulty_level}\n"
-        f"Description: {res.description}"
+def _get_resource_text_fields(resource: Resource) -> tuple[str, str]:
+    """Safely extract tags/keywords and description/summary from a Resource model."""
+    tags = (
+        getattr(resource, "tags", None)
+        or getattr(resource, "keywords", None)
+        or getattr(resource, "course_code", None)
+        or ""
     )
+    desc = (
+        getattr(resource, "description", None)
+        or getattr(resource, "summary", None)
+        or getattr(resource, "abstract", None)
+        or ""
+    )
+    return str(tags), str(desc)
 
 
-def sync_catalog_to_vector_store(db: Session) -> dict:
-    """Index all SQLite catalog resources into ChromaDB (idempotent upsert)."""
+def index_single_resource(resource: Resource) -> None:
+    """Index or update a single Resource in ChromaDB dynamically (supports live updates)."""
     collection = get_chroma_collection()
-    resources: List[Resource] = db.query(Resource).all()
-    if not resources:
-        return {"status": "empty", "indexed_count": 0}
+    tags, desc = _get_resource_text_fields(resource)
+    doc_text = (
+        f"Title: {resource.title}. Authors: {resource.authors}. "
+        f"Subject: {resource.subject}. Type: {resource.resource_type}. "
+        f"Difficulty: {resource.difficulty_level}. "
+        f"Tags: {tags}. Description: {desc}"
+    )
+    metadata = {
+        "resource_code": resource.resource_code,
+        "title": resource.title,
+        "subject": resource.subject,
+        "resource_type": resource.resource_type,
+        "difficulty_level": resource.difficulty_level,
+    }
+    collection.upsert(
+        ids=[resource.resource_code],
+        documents=[doc_text],
+        metadatas=[metadata],
+    )
 
-    ids = [r.resource_code for r in resources]
-    documents = [_resource_to_document(r) for r in resources]
-    metadatas = [
-        {
+
+# Alias for backward compatibility
+index_resource_in_vector_store = index_single_resource
+
+
+def sync_catalog_to_vector_store(db: Session) -> int:
+    """Synchronize all SQLite catalog resources into ChromaDB."""
+    resources = db.query(Resource).all()
+    for res in resources:
+        index_single_resource(res)
+    return len(resources)
+
+
+def semantic_catalog_search(
+    db: Session,
+    query: str,
+    difficulty_level: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    top_k: int = 5,
+) -> Dict[str, Any]:
+    """Perform hybrid semantic + metadata search grounded strictly in SQLite catalog holdings."""
+    sync_catalog_to_vector_store(db)
+    collection = get_chroma_collection()
+
+    total_docs = collection.count()
+    if total_docs == 0:
+        return {"status": "not_found", "count": 0, "results": []}
+
+    q_lower = query.lower()
+    stop_words = {
+        "find", "books", "book", "on", "for", "the", "a", "an", "in", "of",
+        "to", "and", "or", "is", "are", "available", "papers", "related",
+        "about", "recommend", "suggest", "beginner", "intermediate", "advanced",
+        "resources", "learning", "that", "currently", "title", "not", "present",
+        "any", "authorized", "source",
+    }
+    keywords = [w for w in re.findall(r"\w+", q_lower) if w not in stop_words and len(w) > 2]
+
+    all_resources = db.query(Resource).all()
+    lexical_matches = []
+    for r in all_resources:
+        if difficulty_level and r.difficulty_level.lower() != difficulty_level.lower():
+            continue
+        if resource_type and r.resource_type.lower() != resource_type.lower():
+            continue
+        tags, desc = _get_resource_text_fields(r)
+        haystack = f"{r.title} {r.authors} {r.subject} {tags} {desc}".lower()
+        score = sum(1 for kw in keywords if kw in haystack)
+        if score > 0:
+            lexical_matches.append((score, r))
+
+    if not lexical_matches:
+        return {
+            "status": "not_found",
+            "message": "No matching resources found in any authorized library source.",
+            "count": 0,
+            "results": [],
+        }
+
+    n_results = min(top_k, total_docs)
+    chroma_res = collection.query(query_texts=[query], n_results=n_results)
+    vector_rank = {
+        code: idx for idx, code in enumerate(chroma_res.get("ids", [[]])[0])
+    }
+
+    lexical_matches.sort(
+        key=lambda item: (-item[0], vector_rank.get(item[1].resource_code, 999))
+    )
+
+    results = []
+    for score, r in lexical_matches[:top_k]:
+        _, desc = _get_resource_text_fields(r)
+        results.append({
             "resource_code": r.resource_code,
             "title": r.title,
             "authors": r.authors,
@@ -98,129 +183,15 @@ def sync_catalog_to_vector_store(db: Session) -> dict:
             "difficulty_level": r.difficulty_level,
             "branch": r.branch,
             "shelf_location": r.shelf_location,
-        }
-        for r in resources
-    ]
-    collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
-    return {"status": "synced", "indexed_count": len(ids)}
-
-
-def index_single_resource(res: Resource) -> None:
-    """Immediately index a newly created or updated resource without code changes."""
-    collection = get_chroma_collection()
-    collection.upsert(
-        ids=[res.resource_code],
-        documents=[_resource_to_document(res)],
-        metadatas=[
-            {
-                "resource_code": res.resource_code,
-                "title": res.title,
-                "authors": res.authors,
-                "resource_type": res.resource_type,
-                "subject": res.subject,
-                "difficulty_level": res.difficulty_level,
-                "branch": res.branch,
-                "shelf_location": res.shelf_location,
-            }
-        ],
-    )
-
-
-def semantic_catalog_search(
-    db: Session,
-    query: str,
-    top_k: int = 4,
-    difficulty_level: Optional[str] = None,
-    resource_type: Optional[str] = None,
-) -> dict:
-    """
-    Hybrid Semantic + Grounded Catalog Search:
-    1. Queries ChromaDB vector embeddings for semantic relevance.
-    2. Hydrates live availability/holdings directly from authoritative SQLite DB.
-    3. Enforces lexical/semantic grounding so fabricated queries return `not_found`.
-    """
-    if not query or not query.strip():
-        return {"status": "not_found", "message": "Empty search query.", "results": []}
-
-    collection = get_chroma_collection()
-    if collection.count() == 0:
-        sync_catalog_to_vector_store(db)
-
-    where_filter = {}
-    if difficulty_level and difficulty_level.strip():
-        where_filter["difficulty_level"] = difficulty_level.strip().lower()
-    if resource_type and resource_type.strip():
-        where_filter["resource_type"] = resource_type.strip().lower()
-
-    query_kwargs = {
-        "query_texts": [query.strip()],
-        "n_results": min(top_k, max(collection.count(), 1)),
-    }
-    if len(where_filter) == 1:
-        query_kwargs["where"] = where_filter
-    elif len(where_filter) > 1:
-        query_kwargs["where"] = {"$and": [{k: v} for k, v in where_filter.items()]}
-
-    raw = collection.query(**query_kwargs)
-    ids = raw.get("ids", [[]])[0]
-    distances = raw.get("distances", [[]])[0]
-
-    # Stopwords to ignore when checking grounding overlap
-    stopwords = {
-        "find", "book", "books", "paper", "papers", "on", "about", "for",
-        "the", "a", "an", "in", "of", "to", "and", "with", "related",
-        "beginner", "friendly", "intermediate", "advanced", "resources", "resource",
-    }
-    query_terms = {
-        w.strip(".,:;!?()[]\"'").lower()
-        for w in query.split()
-        if len(w.strip(".,:;!?()[]\"'")) > 2
-    } - stopwords
-
-    grounded_results = []
-    for code, dist in zip(ids, distances):
-        # Cosine distance threshold: reject completely unrelated matches
-        if dist is not None and dist > 0.78:
-            continue
-
-        res = db.query(Resource).filter(Resource.resource_code == code).first()
-        if not res:
-            continue
-
-        haystack = f"{res.title} {res.subject} {res.description} {res.authors} {res.resource_code}".lower()
-        has_term_overlap = any(term in haystack for term in query_terms) if query_terms else True
-
-        # Require either strong vector similarity (< 0.55) or lexical domain overlap
-        if not has_term_overlap and (dist is None or dist > 0.55):
-            continue
-
-        grounded_results.append(
-            {
-                "resource_code": res.resource_code,
-                "title": res.title,
-                "authors": res.authors,
-                "resource_type": res.resource_type,
-                "subject": res.subject,
-                "difficulty_level": res.difficulty_level,
-                "description": res.description,
-                "branch": res.branch,
-                "shelf_location": res.shelf_location,
-                "available_copies": res.available_copies,
-                "total_copies": res.total_copies,
-                "digital_url": res.digital_url,
-                "relevance_score": round(max(0.0, 1.0 - float(dist or 0.0)), 3),
-            }
-        )
-
-    if not grounded_results:
-        return {
-            "status": "not_found",
-            "message": f"not_found: No authorized library resources found matching '{query}'.",
-            "results": [],
-        }
+            "total_copies": r.total_copies,
+            "available_copies": r.available_copies,
+            "digital_url": getattr(r, "digital_url", None),
+            "description": desc,
+            "relevance_score": score,
+        })
 
     return {
         "status": "success",
-        "count": len(grounded_results),
-        "results": grounded_results,
+        "count": len(results),
+        "results": results,
     }

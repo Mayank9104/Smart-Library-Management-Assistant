@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from backend.db import get_db, sync_catalog_to_vector_store
+from backend.db import get_db, init_db, sync_catalog_to_vector_store
 from backend.models import User
 from backend.schemas import ChatRequest, ChatResponse
 from backend.services import (
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/v1", tags=["Library API"])
 @router.post("/seed", summary="Seed initial library data")
 def seed_database(db: Session = Depends(get_db)) -> dict:
     """Populate database with sample users, catalog resources, and loans."""
+    init_db()
     result = seed_initial_data(db)
     sync_catalog_to_vector_store(db)
     return result
@@ -25,6 +26,7 @@ def seed_database(db: Session = Depends(get_db)) -> dict:
 @router.post("/chat", response_model=ChatResponse, summary="Process AI Assistant Chat Query")
 def chat_with_assistant(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     """Send a natural-language query to the AI Smart Library Assistant."""
+    init_db()
     if db.query(User).count() == 0:
         seed_initial_data(db)
         sync_catalog_to_vector_store(db)
@@ -43,6 +45,7 @@ def search_catalog(
     db: Session = Depends(get_db),
 ) -> dict:
     """Search catalog items using semantic vector search and SQLite holdings."""
+    init_db()
     if db.query(User).count() == 0:
         seed_initial_data(db)
         sync_catalog_to_vector_store(db)
@@ -55,6 +58,7 @@ def search_catalog(
 @router.get("/analytics", summary="Librarian Circulation & Demand Analytics")
 def get_analytics(db: Session = Depends(get_db)) -> dict:
     """Retrieve Pandas-powered analytics for librarian operations."""
+    init_db()
     if db.query(User).count() == 0:
         seed_initial_data(db)
         sync_catalog_to_vector_store(db)
