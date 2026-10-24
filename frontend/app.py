@@ -12,6 +12,96 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Custom CSS for polished UI ──
+st.markdown(
+    """
+    <style>
+    /* Global font & background tweaks */
+    .stApp {
+        font-family: 'Segoe UI', 'Roboto', sans-serif;
+    }
+
+    /* Sidebar styling */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    }
+    section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stRadio label, section[data-testid="stSidebar"] span {
+        color: #e0e0e0 !important;
+    }
+    section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] h4 {
+        color: #ffffff !important;
+    }
+
+    /* Tab styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px 8px 0 0;
+        padding: 10px 20px;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #e8f4f8;
+    }
+
+    /* Chat message styling */
+    .stChatMessage {
+        border-radius: 12px;
+        margin-bottom: 8px;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 12px;
+        padding: 16px;
+        color: white;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    [data-testid="stMetric"] label {
+        color: rgba(255, 255, 255, 0.85) !important;
+        font-size: 0.85rem !important;
+    }
+    [data-testid="stMetric"] [data-testid="stMetricValue"] {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+    }
+
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+
+    /* Button hover effects */
+    .stButton > button {
+        transition: all 0.2s ease;
+        border-radius: 8px;
+    }
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    /* Dataframe styling */
+    .stDataFrame {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    /* Divider styling */
+    hr {
+        border: none;
+        border-top: 1px solid rgba(128, 128, 128, 0.2);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Initialize session state for authentication
 if "auth_token" not in st.session_state:
     st.session_state.auth_token = None
@@ -30,7 +120,7 @@ def get_auth_headers() -> dict:
 
 # --- SIDEBAR: Authentication (Sign In / Sign Up / Demo Quick Login) ---
 with st.sidebar:
-    st.header("🔐 Library Authentication")
+    st.markdown("## 🔐 Library Authentication")
 
     if st.session_state.auth_user:
         u = st.session_state.auth_user
@@ -117,10 +207,10 @@ with st.sidebar:
         else:
             st.caption("Instant 1-click login for Hackathon Judges:")
             demo_accounts = {
-                "STU001 — Abhinav Gangwar (Student)": "STU001",
-                "STU002 — Priya Nair (Researcher)": "STU002",
-                "FAC001 — Dr. Rajesh Verma (Faculty)": "FAC001",
-                "LIB001 — Meera Krishnan (Librarian Admin)": "LIB001",
+                "👨‍🎓 STU001 — Abhinav Gangwar (Student)": "STU001",
+                "🔬 STU002 — Priya Nair (Researcher)": "STU002",
+                "👨‍🏫 FAC001 — Dr. Rajesh Verma (Faculty)": "FAC001",
+                "📚 LIB001 — Meera Krishnan (Librarian Admin)": "LIB001",
             }
             chosen = st.selectbox("Select Demo Persona:", list(demo_accounts.keys()))
             if st.button("⚡ Sign In as Persona", type="primary", use_container_width=True):
@@ -152,9 +242,18 @@ with st.sidebar:
             st.error(f"Connection failed: {e}")
 
 
-# Main Header
-st.title("📚 AI-Powered Smart Library Management Assistant")
-st.caption("Intelligent Discovery, Research Assistance, Role-Based Circulation Control & Librarian Analytics")
+# ── Main Header ──
+st.markdown(
+    """
+    <div style="text-align: center; padding: 1rem 0 0.5rem 0;">
+        <h1 style="margin-bottom: 0.2rem;">📚 AI-Powered Smart Library Management Assistant</h1>
+        <p style="color: #666; font-size: 1.05rem; margin-top: 0;">
+            Intelligent Discovery · Research Assistance · Role-Based Circulation Control · Librarian Analytics
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 if not st.session_state.auth_user:
     st.info("👈 Please **Sign In** or **Create an Account (Sign Up)** in the left sidebar to access the Smart Library portal.")
@@ -175,17 +274,33 @@ tab1, tab2, tab3, tab4 = st.tabs(tab_labels)
 
 # --- TAB 1: AI Assistant Chat ---
 with tab1:
-    st.header("Conversational Library Assistant")
     st.markdown(
-        f"Authenticated as **{current_user['name']} (`{current_user_id}` — {current_user['role'].upper()})**. "
-        "Ask about books, papers, reservations, renewals, or recommendations."
+        f"""
+        <div style="background: linear-gradient(135deg, #e8f4f8 0%, #f0e6ff 100%); padding: 1rem 1.5rem; border-radius: 12px; margin-bottom: 1rem;">
+            <h3 style="margin: 0 0 0.3rem 0;">🤖 Conversational Library Assistant</h3>
+            <p style="margin: 0; color: #555;">
+                Authenticated as <strong>{current_user['name']}</strong>
+                (<code>{current_user_id}</code> — {current_user['role'].upper()}).
+                Ask about books, papers, reservations, renewals, or recommendations.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
+    # ── Restart Chat Button ──
+    col_spacer, col_restart = st.columns([5, 1])
+    with col_restart:
+        if st.button("🔄 Restart Chat", use_container_width=True, help="Clear conversation history and start fresh"):
+            st.session_state.messages = []
+            st.rerun()
+
+    # Display chat history
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if msg.get("trace_id"):
-                st.caption(f"Trace ID: `{msg['trace_id']}` | Tools: `{', '.join(msg.get('tools_used', []))}`")
+                st.caption(f"🔗 Trace: `{msg['trace_id']}` | 🛠️ Tools: `{', '.join(msg.get('tools_used', []))}`")
 
     if prompt := st.chat_input("e.g., Reserve BK-002 for me, or Recommend beginner resources for generative AI"):
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -193,7 +308,7 @@ with tab1:
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner("Executing deterministic library tools..."):
+            with st.spinner("🔍 Processing your request..."):
                 try:
                     payload = {"user_id": current_user_id, "message": prompt}
                     res = requests.post(
@@ -206,8 +321,8 @@ with tab1:
                         data = res.json()
                         st.markdown(data["answer"])
                         st.caption(
-                            f"Trace ID: `{data['trace_id']}` | Outcome: `{data['outcome']}` | "
-                            f"Tools: `{', '.join(data['tools_used']) or 'None'}`"
+                            f"🔗 Trace: `{data['trace_id']}` | ✅ Outcome: `{data['outcome']}` | "
+                            f"🛠️ Tools: `{', '.join(data['tools_used']) or 'None'}`"
                         )
                         if data.get("cited_resources"):
                             st.info(f"📚 **Cited Resources:** {', '.join(data['cited_resources'])}")
@@ -225,10 +340,19 @@ with tab1:
 
 # --- TAB 2: Catalog & Direct Reservation ---
 with tab2:
-    st.header("Semantic Catalog Search & Instant Reservation")
+    st.markdown(
+        """
+        <div style="background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); padding: 1rem 1.5rem; border-radius: 12px; margin-bottom: 1rem;">
+            <h3 style="margin: 0 0 0.3rem 0;">🔍 Semantic Catalog Search & Instant Reservation</h3>
+            <p style="margin: 0; color: #555;">Search across books, journals, papers, dissertations and e-books.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
-        search_query = st.text_input("Search books, journals, papers, dissertations:", "Artificial Intelligence")
+        search_query = st.text_input("Search books, journals, papers, dissertations:", "Artificial Intelligence", label_visibility="collapsed", placeholder="🔍 Search books, journals, papers, dissertations...")
     with col2:
         diff_filter = st.selectbox("Difficulty", ["All", "beginner", "intermediate", "advanced"])
     with col3:
@@ -251,18 +375,29 @@ with tab2:
     search_data = st.session_state.get("last_search_results")
     if search_data:
         if search_data.get("status") == "success":
-            st.success(f"Found {search_data['count']} grounded catalog resources.")
+            st.success(f"✅ Found **{search_data['count']}** grounded catalog resources.")
             for item in search_data["results"]:
                 code = item["resource_code"]
-                with st.expander(f"[{code}] {item['title']} ({item['resource_type'].upper()}) — {item['available_copies']}/{item['total_copies']} Available", expanded=True):
+                avail = item["available_copies"]
+                total = item["total_copies"]
+                avail_color = "🟢" if avail > 0 else "🔴"
+                with st.expander(
+                    f"{avail_color} [{code}] {item['title']} ({item['resource_type'].upper()}) — {avail}/{total} Available",
+                    expanded=False,
+                ):
                     c_info, c_act = st.columns([3, 1])
                     with c_info:
-                        st.write(f"**Authors:** {item['authors']}")
-                        st.write(f"**Subject:** {item['subject']} | **Level:** `{item['difficulty_level'].title()}`")
-                        st.write(f"**Location:** {item['branch']} — Shelf `{item['shelf_location']}`")
-                        st.caption(item.get("description", ""))
+                        st.markdown(f"**✍️ Authors:** {item['authors']}")
+                        st.markdown(f"**📂 Subject:** {item['subject']} &nbsp;|&nbsp; **📊 Level:** `{item['difficulty_level'].title()}`")
+                        st.markdown(f"**📍 Location:** {item['branch']} — Shelf `{item['shelf_location']}`")
+                        if item.get("description"):
+                            st.caption(item["description"])
                     with c_act:
-                        if st.button(f"📌 Reserve {code}", key=f"res_btn_{code}", use_container_width=True):
+                        if avail > 0:
+                            btn_label = f"📌 Reserve {code}"
+                        else:
+                            btn_label = f"⏳ Waitlist {code}"
+                        if st.button(btn_label, key=f"res_btn_{code}", use_container_width=True):
                             r_resp = requests.post(
                                 f"{BACKEND_URL}/api/v1/circulation/reserve",
                                 json={"user_id": current_user_id, "resource_code": code},
@@ -279,7 +414,15 @@ with tab2:
 
 # --- TAB 3: My Account & Circulation (Persisted Loans, Reservations & Privacy Check) ---
 with tab3:
-    st.header("📋 Account Summary, Active Loans & Saved Reservations")
+    st.markdown(
+        """
+        <div style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); padding: 1rem 1.5rem; border-radius: 12px; margin-bottom: 1rem;">
+            <h3 style="margin: 0 0 0.3rem 0;">📋 Account Summary, Active Loans & Saved Reservations</h3>
+            <p style="margin: 0; color: #555;">View your borrowed items, fines, renewals, and reservation queue.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     col_left, col_right = st.columns([2, 1])
     with col_left:
@@ -328,12 +471,14 @@ with tab3:
                 loans = acc_data.get("active_loans", [])
                 if loans:
                     for loan in loans:
+                        status_emoji = "⚠️" if loan["status"].lower() == "overdue" else "✅"
                         l_col1, l_col2 = st.columns([4, 1])
                         with l_col1:
+                            fine_display = f" | 💰 Fine: **${loan.get('fine_amount', 0.0):.2f}**" if loan.get("fine_amount", 0) > 0 else ""
                             st.markdown(
-                                f"**[{loan['resource_code']}] {loan['title']}** — "
+                                f"{status_emoji} **[{loan['resource_code']}] {loan['title']}** — "
                                 f"Due: `{loan['due_date']}` | Status: `{loan['status'].upper()}` | "
-                                f"Renewals used: `{loan['renewals_used']}` | Fine: `${loan.get('fine_amount', 0.0):.2f}`"
+                                f"Renewals used: `{loan['renewals_used']}`{fine_display}"
                             )
                         with l_col2:
                             if st.button(f"🔄 Renew {loan['resource_code']}", key=f"renew_{loan['resource_code']}"):
@@ -350,14 +495,14 @@ with tab3:
                                 else:
                                     st.warning(ren_data.get("message", "Renewal denied."))
                 else:
-                    st.info("No active borrowed items on this account.")
+                    st.info("📭 No active borrowed items on this account.")
 
                 st.subheader("📌 Active Reservations & Holds")
                 reservations = acc_data.get("active_reservations", [])
                 if reservations:
                     st.dataframe(reservations, use_container_width=True)
                 else:
-                    st.info("No active reservations yet. Reserve a book above or in the Catalog tab!")
+                    st.info("📭 No active reservations yet. Reserve a book above or in the Catalog tab!")
             else:
                 st.warning(acc_data.get("message", "Account not found."))
     except Exception as e:
@@ -365,15 +510,32 @@ with tab3:
 
 # --- TAB 4: Librarian Analytics & Admin Controls (Secured by RBAC) ---
 with tab4:
-    st.header("🛡️ Librarian Analytics & Admin Control Center")
-
     if not is_librarian:
-        st.warning(
-            f"🔒 **Restricted Access:** You are signed in as **{current_user['name']}** with role **`{current_user['role'].upper()}`**. "
-            "Only users with the **`LIBRARIAN`** role (e.g., `LIB001` or a newly registered librarian account) can access Analytics and Admin Catalog Controls."
+        st.markdown(
+            f"""
+            <div style="background: linear-gradient(135deg, #ffeaa7 0%, #fab1a0 100%); padding: 1.5rem; border-radius: 12px; text-align: center;">
+                <h3 style="margin: 0 0 0.5rem 0;">🔒 Restricted Access</h3>
+                <p style="margin: 0; color: #555;">
+                    You are signed in as <strong>{current_user['name']}</strong> with role <strong>{current_user['role'].upper()}</strong>.
+                    Only users with the <strong>LIBRARIAN</strong> role (e.g., <code>LIB001</code> or a newly registered librarian account)
+                    can access Analytics and Admin Catalog Controls.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
     else:
-        st.success(f"🔓 **Librarian Admin Mode Active** (`{current_user_id}` — {current_user['name']})")
+        st.markdown(
+            f"""
+            <div style="background: linear-gradient(135deg, #c3fae8 0%, #b2f5ea 100%); padding: 1rem 1.5rem; border-radius: 12px; margin-bottom: 1rem;">
+                <h3 style="margin: 0 0 0.3rem 0;">🛡️ Librarian Analytics & Admin Control Center</h3>
+                <p style="margin: 0; color: #555;">
+                    🔓 <strong>Librarian Admin Mode Active</strong> (<code>{current_user_id}</code> — {current_user['name']})
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         admin_sub1, admin_sub2, admin_sub3 = st.tabs([
             "📊 Demand & Waitlist Analytics",
@@ -392,25 +554,31 @@ with tab4:
                     data = resp.json()
                     kpis = data.get("kpis", {})
                     m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Catalog Titles", kpis.get("total_catalog_titles", 0))
-                    m2.metric("Active Loans", kpis.get("total_active_loans", 0))
-                    m3.metric("Overdue Loans", kpis.get("overdue_loans_count", 0))
-                    m4.metric("Waitlist Requests", kpis.get("active_waitlist_requests", 0))
+                    m1.metric("📚 Catalog Titles", kpis.get("total_catalog_titles", 0))
+                    m2.metric("📖 Active Loans", kpis.get("total_active_loans", 0))
+                    m3.metric("⚠️ Overdue Loans", kpis.get("overdue_loans_count", 0))
+                    m4.metric("⏳ Waitlist Requests", kpis.get("active_waitlist_requests", 0))
 
                     st.subheader("📌 Longest Waitlists & High-Demand Titles")
                     waitlists = data.get("longest_waitlists", [])
                     if waitlists:
                         st.dataframe(waitlists, use_container_width=True)
+                    else:
+                        st.info("No items currently on the waitlist.")
 
                     st.subheader("📚 Subject Utilization & Demand")
                     subjects = data.get("subject_demand", [])
                     if subjects:
                         st.dataframe(subjects, use_container_width=True)
+                    else:
+                        st.info("No subject demand data available.")
 
                     st.subheader("⚠️ Overdue Items & Fines")
                     overdues = data.get("overdue_items", [])
                     if overdues:
                         st.dataframe(overdues, use_container_width=True)
+                    else:
+                        st.success("✅ No overdue items! All loans are current.")
             except Exception as e:
                 st.error(f"Error loading analytics: {e}")
 
@@ -459,14 +627,25 @@ with tab4:
 
         with admin_sub3:
             st.subheader("🗂️ All Active Loans & Reservations Across University")
-            circ_resp = requests.get(
-                f"{BACKEND_URL}/api/v1/admin/circulation",
-                headers=get_auth_headers(),
-                timeout=5,
-            )
-            if circ_resp.status_code == 200:
-                c_data = circ_resp.json()
-                st.write("**All Active Loans:**")
-                st.dataframe(c_data.get("loans", []), use_container_width=True)
-                st.write("**All Active Reservations / Holds:**")
-                st.dataframe(c_data.get("reservations", []), use_container_width=True)
+            try:
+                circ_resp = requests.get(
+                    f"{BACKEND_URL}/api/v1/admin/circulation",
+                    headers=get_auth_headers(),
+                    timeout=5,
+                )
+                if circ_resp.status_code == 200:
+                    c_data = circ_resp.json()
+                    st.markdown("**📖 All Active Loans:**")
+                    loan_data = c_data.get("loans", [])
+                    if loan_data:
+                        st.dataframe(loan_data, use_container_width=True)
+                    else:
+                        st.info("No active loans in the system.")
+                    st.markdown("**📌 All Active Reservations / Holds:**")
+                    res_data = c_data.get("reservations", [])
+                    if res_data:
+                        st.dataframe(res_data, use_container_width=True)
+                    else:
+                        st.info("No active reservations in the system.")
+            except Exception as e:
+                st.error(f"Error loading circulation data: {e}")

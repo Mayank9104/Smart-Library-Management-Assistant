@@ -256,7 +256,7 @@ def get_account_details(
             "title": res.title if res else "Unknown Title",
             "due_date": str(loan.due_date),
             "status": loan.status,
-            "renewals_used": getattr(loan, "renewals_used", 0),
+            "renewals_used": getattr(loan, "renewal_count", getattr(loan, "renewals_used", 0)),
             "max_renewals": getattr(loan, "max_renewals", 2),
             "fine_amount": float(getattr(loan, "fine_amount", 0.0) or 0.0),
         })
@@ -400,13 +400,14 @@ def renew_resource_endpoint(
         }
 
     max_ren = getattr(loan, "max_renewals", 2)
-    if loan.renewals_used >= max_ren:
+    current_renewals = getattr(loan, "renewal_count", getattr(loan, "renewals_used", 0))
+    if current_renewals >= max_ren:
         return {
             "status": "denied",
             "message": f"Maximum renewals ({max_ren}) already reached for [{code}].",
         }
 
-    loan.renewals_used += 1
+    loan.renewal_count = current_renewals + 1
     if isinstance(loan.due_date, datetime):
         loan.due_date = loan.due_date + timedelta(days=14)
     db.commit()
@@ -416,7 +417,7 @@ def renew_resource_endpoint(
         "status": "success",
         "message": f"Loan for [{code}] '{resource.title}' renewed! New due date: {loan.due_date}.",
         "resource_code": code,
-        "renewals_used": loan.renewals_used,
+        "renewals_used": loan.renewal_count,
     }
 
 
@@ -506,7 +507,7 @@ def admin_view_all_circulation(
             "title": res.title if res else "Unknown",
             "due_date": str(loan.due_date),
             "status": loan.status,
-            "renewals_used": loan.renewals_used,
+            "renewals_used": loan.renewal_count,
             "fine_amount": loan.fine_amount,
         })
 
