@@ -472,7 +472,7 @@ with tab3:
                 if loans:
                     for loan in loans:
                         status_emoji = "⚠️" if loan["status"].lower() == "overdue" else "✅"
-                        l_col1, l_col2 = st.columns([4, 1])
+                        l_col1, l_col2, l_col3 = st.columns([4, 1, 1])
                         with l_col1:
                             fine_display = f" | 💰 Fine: **${loan.get('fine_amount', 0.0):.2f}**" if loan.get("fine_amount", 0) > 0 else ""
                             st.markdown(
@@ -494,13 +494,54 @@ with tab3:
                                     st.rerun()
                                 else:
                                     st.warning(ren_data.get("message", "Renewal denied."))
+                        with l_col3:
+                            if st.button(f"📤 Return {loan['resource_code']}", key=f"return_{loan['resource_code']}"):
+                                ret_resp = requests.post(
+                                    f"{BACKEND_URL}/api/v1/circulation/return",
+                                    json={"user_id": inspect_user_id, "resource_code": loan["resource_code"]},
+                                    headers=get_auth_headers(),
+                                    timeout=5,
+                                )
+                                ret_data = ret_resp.json()
+                                if ret_data.get("status") == "success":
+                                    st.success(ret_data.get("message", "Book returned!"))
+                                    st.rerun()
+                                else:
+                                    st.warning(ret_data.get("message", "Return failed."))
                 else:
                     st.info("📭 No active borrowed items on this account.")
 
                 st.subheader("📌 Active Reservations & Holds")
                 reservations = acc_data.get("active_reservations", [])
                 if reservations:
-                    st.dataframe(reservations, use_container_width=True)
+                    for res_item in reservations:
+                        r_col1, r_col2 = st.columns([4, 1])
+                        with r_col1:
+                            status_badge = "🟢" if res_item["status"] == "ready_for_pickup" else "🟡"
+                            st.markdown(
+                                f"{status_badge} **[{res_item['resource_code']}] {res_item['title']}** — "
+                                f"Status: `{res_item['status'].upper()}` | "
+                                f"Queue: `#{res_item.get('waitlist_position', '—')}` | "
+                                f"📍 {res_item['branch']} (`{res_item['shelf_location']}`)"
+                            )
+                        with r_col2:
+                            if st.button(
+                                f"❌ Cancel {res_item['resource_code']}",
+                                key=f"cancel_res_{res_item['reservation_id']}",
+                                use_container_width=True,
+                            ):
+                                cancel_resp = requests.post(
+                                    f"{BACKEND_URL}/api/v1/circulation/cancel-reservation",
+                                    json={"user_id": inspect_user_id, "resource_code": res_item["resource_code"]},
+                                    headers=get_auth_headers(),
+                                    timeout=5,
+                                )
+                                cancel_data = cancel_resp.json()
+                                if cancel_data.get("status") == "success":
+                                    st.success(cancel_data.get("message", "Reservation cancelled!"))
+                                    st.rerun()
+                                else:
+                                    st.warning(cancel_data.get("message", "Cancellation failed."))
                 else:
                     st.info("📭 No active reservations yet. Reserve a book above or in the Catalog tab!")
             else:

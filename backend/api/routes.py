@@ -246,7 +246,11 @@ def get_account_details(
     if not target_user:
         return {"status": "not_found", "message": f"User '{target_uid}' not found."}
 
-    loans = db.query(Loan).filter(Loan.user_id == target_user.id).all()
+    loans = (
+        db.query(Loan)
+        .filter(Loan.user_id == target_user.id, Loan.status.in_(["borrowed", "overdue"]))
+        .all()
+    )
     active_loans = []
     for loan in loans:
         res = db.query(Resource).filter(Resource.id == loan.resource_id).first()
@@ -261,7 +265,14 @@ def get_account_details(
             "fine_amount": float(getattr(loan, "fine_amount", 0.0) or 0.0),
         })
 
-    reservations = db.query(Reservation).filter(Reservation.user_id == target_user.id).all()
+    reservations = (
+        db.query(Reservation)
+        .filter(
+            Reservation.user_id == target_user.id,
+            Reservation.status.in_(["active", "ready_for_pickup", "waitlisted", "pending"]),
+        )
+        .all()
+    )
     active_reservations = []
     for r in reservations:
         res = db.query(Resource).filter(Resource.id == r.resource_id).first()
@@ -272,7 +283,7 @@ def get_account_details(
             "branch": res.branch if res else "Central Library",
             "shelf_location": res.shelf_location if res else "N/A",
             "status": r.status,
-            "queue_position": getattr(r, "queue_position", 1),
+            "waitlist_position": getattr(r, "waitlist_position", 1),
         })
 
     return {
@@ -339,9 +350,8 @@ def reserve_resource_endpoint(
         user_id=user.id,
         resource_id=resource.id,
         status=res_status,
+        waitlist_position=queue_count + 1,
     )
-    if hasattr(new_reservation, "queue_position"):
-        setattr(new_reservation, "queue_position", queue_count + 1)
 
     db.add(new_reservation)
     db.commit()
@@ -418,6 +428,132 @@ def renew_resource_endpoint(
         "message": f"Loan for [{code}] '{resource.title}' renewed! New due date: {loan.due_date}.",
         "resource_code": code,
         "renewals_used": loan.renewal_count,
+    }
+
+
+@router.post("/circulation/return", summary="Return / release a borrowed book")
+def return_resource_endpoint(
+    payload: CirculationActionRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return a borrowed item: mark loan as returned, increment available copies, and auto-fulfill waitlisted reservations."""
+    _ensure_seeded(db)
+    effective_user_id = (current_user.user_id if current_user else payload.user_id or "").strip().upper()
+    if not effective_user_id:
+        raise HTTPException(status_code=401, detail="User authentication required to return a resource.")
+
+    code = payload.resource_code.strip().upper()
+    user = db.query(User).filter(User.user_id == effective_user_id).first()
+    if not user:
+        return {"status": "error", "message": f"User '{effective_user_id}' not found."}
+
+    resource = db.query(Resource).filter(Resource.resource_code == code).first()
+    if not resource:
+        return {"status": "not_found", "message": f"Resource '{code}' not found in catalog."}
+
+    loan = (
+        db.query(Loan)
+        .filter(
+            Loan.user_id == user.id,
+            Loan.resource_id == resource.id,
+            Loan.status.in_(["borrowed", "overdue"]),
+        )
+        .first()
+    )
+    if not loan:
+        return {"status": "not_found", "message": f"No active loan found for [{code}] on this account."}
+
+    # Mark loan as returned
+    loan.status = "returned"
+    loan.returned_at = datetime.utcnow()
+
+    # Increment available copies
+    resource.available_copies = min(resource.available_copies + 1, resource.total_copies)
+
+    # Auto-fulfill the next waitlisted reservation if any
+    next_reservation = (
+        db.query(Reservation)
+        .filter(
+            Reservation.resource_id == resource.id,
+            Reservation.status.in_(["active", "waitlisted"]),
+        )
+        .order_by(Reservation.waitlist_position.asc())
+        .first()
+    )
+    fulfilled_msg = ""
+    if next_reservation:
+        next_reservation.status = "ready_for_pickup"
+        resource.available_copies = max(resource.available_copies - 1, 0)
+        next_user = db.query(User).filter(User.id == next_reservation.user_id).first()
+        fulfilled_msg = f" Next in waitlist ({next_user.user_id if next_user else 'unknown'}) has been notified for pickup."
+
+    db.commit()
+
+    fine_note = ""
+    if loan.fine_amount and loan.fine_amount > 0:
+        fine_note = f" Outstanding fine: ${loan.fine_amount:.2f} (please settle at the circulation desk)."
+
+    return {
+        "status": "success",
+        "message": (
+            f"[{code}] '{resource.title}' has been returned by {user.name} ({user.user_id}). "
+            f"Available copies: {resource.available_copies}/{resource.total_copies}.{fine_note}{fulfilled_msg}"
+        ),
+        "resource_code": code,
+        "available_copies": resource.available_copies,
+        "total_copies": resource.total_copies,
+    }
+
+
+@router.post("/circulation/cancel-reservation", summary="Cancel an active reservation")
+def cancel_reservation_endpoint(
+    payload: CirculationActionRequest,
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Cancel an active reservation and restore available copies if it was ready for pickup."""
+    _ensure_seeded(db)
+    effective_user_id = (current_user.user_id if current_user else payload.user_id or "").strip().upper()
+    if not effective_user_id:
+        raise HTTPException(status_code=401, detail="User authentication required to cancel a reservation.")
+
+    code = payload.resource_code.strip().upper()
+    user = db.query(User).filter(User.user_id == effective_user_id).first()
+    if not user:
+        return {"status": "error", "message": f"User '{effective_user_id}' not found."}
+
+    resource = db.query(Resource).filter(Resource.resource_code == code).first()
+    if not resource:
+        return {"status": "not_found", "message": f"Resource '{code}' not found in catalog."}
+
+    reservation = (
+        db.query(Reservation)
+        .filter(
+            Reservation.user_id == user.id,
+            Reservation.resource_id == resource.id,
+            Reservation.status.in_(["active", "ready_for_pickup", "waitlisted", "pending"]),
+        )
+        .first()
+    )
+    if not reservation:
+        return {"status": "not_found", "message": f"No active reservation found for [{code}] on this account."}
+
+    old_status = reservation.status
+    reservation.status = "cancelled"
+
+    # If the reservation had a copy set aside, restore it
+    if old_status == "ready_for_pickup":
+        resource.available_copies = min(resource.available_copies + 1, resource.total_copies)
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": (
+            f"Reservation for [{code}] '{resource.title}' has been cancelled for {user.name} ({user.user_id})."
+        ),
+        "resource_code": code,
     }
 
 
@@ -522,7 +658,7 @@ def admin_view_all_circulation(
             "resource_code": res.resource_code if res else str(r.resource_id),
             "title": res.title if res else "Unknown",
             "status": r.status,
-            "queue_position": getattr(r, "queue_position", 1),
+            "queue_position": getattr(r, "waitlist_position", 1),
         })
 
     return {
